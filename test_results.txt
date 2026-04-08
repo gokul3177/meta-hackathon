@@ -1,0 +1,14 @@
+ case_id  steps  total_reward  final_wait_time  tasks_completed    status
+       1     46         296.4        13.428571                7   Success
+       2     87         528.5        12.285714               14   Success
+       3    100         282.2        20.380952               15 Timed Out
+       4    100         886.4        14.631579               17 Timed Out
+       5     60         354.5         7.000000               10   Success
+       6     50         208.9        10.571429                7   Success
+       7     88         511.9        15.500000               14   Success
+       8    100         646.5        15.470588               15 Timed Out
+       9     20          94.4         7.333333                3   Success
+      10    100         803.1        12.608696               17 Timed Out
+
+Analysis:
+Overall the environment is stable across 10 random seeds. Invalid actions were handled without crashes.

@@ -1,6 +1,7 @@
 import numpy as np
 import random
 from fastapi import FastAPI
+from fastapi.responses import FileResponse
 from openenv.env.env import Env
 from models import Task, EnvState, Action, Observation, StepResponse, ResetResponse, StateResponse, TaskStatus
 
@@ -128,6 +129,10 @@ class CPUSchedulerEnv(Env):
 
 # API
 env = CPUSchedulerEnv()
+
+@app.get("/", include_in_schema=False)
+def index():
+    return FileResponse("index.html")
 
 @app.post("/reset", response_model=ResetResponse)
 def reset():
