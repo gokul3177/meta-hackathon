@@ -1,88 +1,132 @@
 import numpy as np
 import random
 from fastapi import FastAPI
-from models import Task, EnvState, Action, Observation, StepResponse, ResetResponse
+from openenv.env.env import Env
+from models import Task, EnvState, Action, Observation, StepResponse, ResetResponse, StateResponse, TaskStatus
 
-app = FastAPI(title="CPU Scheduler RL Environment")
+app = FastAPI(title="Real-World CPU Scheduler RL Environment")
 
-class CPUSchedulerEnv:
+class CPUSchedulerEnv(Env):
     def __init__(self, max_tasks=10):
         self.max_tasks = max_tasks
+        self.total_reward = 0.0
         self.reset()
 
     def reset(self):
         self.current_time = 0
         self.task_queue = []
         self.finished_tasks = []
+        self.total_reward = 0.0
         
-        # Generate 3-5 random tasks
+        # Generate 3-5 initial random tasks
         num_tasks = random.randint(3, 5)
         for i in range(num_tasks):
-            burst = random.randint(2, 10)
-            task = Task(
-                task_id=i,
-                arrival_time=0,
-                burst_time=burst,
-                remaining_time=burst,
-                waiting_time=0
-            )
-            self.task_queue.append(task)
+            self._generate_task(i)
             
         return self._get_observation()
 
+    def _generate_task(self, task_id_prefix=None):
+        if len(self.task_queue) >= self.max_tasks:
+            return None
+            
+        tid = task_id_prefix if task_id_prefix is not None else random.randint(100, 999)
+        burst = random.randint(2, 10)
+        priority = random.randint(1, 10)
+        
+        task = Task(
+            task_id=tid,
+            arrival_time=self.current_time,
+            burst_time=burst,
+            remaining_time=burst,
+            waiting_time=0,
+            priority=priority,
+            status=TaskStatus.READY
+        )
+        self.task_queue.append(task)
+        return task
+
+    def state(self):
+        # Calculate system metrics
+        total_wait = sum(t.waiting_time for t in self.finished_tasks + self.task_queue)
+        avg_wait = total_wait / (len(self.finished_tasks) + len(self.task_queue)) if (len(self.finished_tasks) + len(self.task_queue)) > 0 else 0
+        
+        # CPU utilization is % of time spent on tasks vs idle (simulation is 1 unit per step)
+        # In this minimal env, we assume CPU is active if queue is not empty.
+        cpu_util = 1.0 if len(self.task_queue) > 0 else 0.0
+        
+        return EnvState(
+            current_time=self.current_time,
+            task_queue=self.task_queue,
+            finished_tasks=self.finished_tasks,
+            cpu_utilization=cpu_util,
+            avg_waiting_time=avg_wait,
+            total_reward=self.total_reward
+        )
+
     def _get_observation(self):
-        # Observation is a flat list of [remaining_time, waiting_time] for each task slot
+        # [remaining_time, waiting_time, priority] per task slot
         obs_data = []
         for i in range(self.max_tasks):
             if i < len(self.task_queue):
                 task = self.task_queue[i]
-                obs_data.extend([float(task.remaining_time), float(task.waiting_time)])
+                obs_data.extend([
+                    float(task.remaining_time), 
+                    float(task.waiting_time),
+                    float(task.priority)
+                ])
             else:
-                obs_data.extend([0.0, 0.0]) # Padding
+                obs_data.extend([0.0, 0.0, 0.0]) # Padding
         return Observation(data=obs_data)
 
     def step(self, action_idx):
-        reward = 0
+        reward = 0.0
         done = False
         
-        # If queue empty but env not done (shouldn't happen with proper logic)
         if not self.task_queue:
             return self._get_observation(), -5.0, True, {"msg": "No tasks left"}
 
-        # Action corresponds to task index in the current queue
-        # If action is invalid (out of bounds), penalize and pick the first one or stay idle
+        # Dynamic Task Arrival (15% chance of a new task appearing)
+        if random.random() < 0.15:
+            self._generate_task()
+
+        # Action Handling
         if action_idx < 0 or action_idx >= len(self.task_queue):
-            reward -= 2.0
-            actual_action = 0 # Fallback
+            reward -= 5.0 # Heavier penalty for invalid actions
+            actual_action = 0 
         else:
             actual_action = action_idx
 
-        # Execute selected task for 1 unit
+        # Execute Task
         task = self.task_queue[actual_action]
+        task.status = TaskStatus.RUNNING
         task.remaining_time -= 1
         self.current_time += 1
         
-        # Update waiting times for OTHER tasks in queue
+        # Update waiting times for others
         for i, t in enumerate(self.task_queue):
             if i != actual_action:
                 t.waiting_time += 1
+                t.status = TaskStatus.READY
         
-        # Reward logic
-        reward -= 1.0 # Constant penalty for time passing
+        # Real-world reward: Penalize based on priority
+        # High priority tasks waiting = more penalty
+        step_penalty = sum(t.priority * 0.1 for t in self.task_queue if t != task)
+        reward -= (1.0 + step_penalty)
         
-        # Check if task completed
+        # Completion bonus weighted by priority
         if task.remaining_time <= 0:
-            reward += 10.0
+            reward += (10.0 * task.priority)
+            task.status = TaskStatus.COMPLETED
             self.finished_tasks.append(task)
             self.task_queue.pop(actual_action)
             
-        # Check if all tasks finished
         if not self.task_queue:
             done = True
             
+        self.total_reward += reward
         return self._get_observation(), float(reward), done, {}
 
-# Initialize global environment instance
+# API
 env = CPUSchedulerEnv()
 
 @app.post("/reset", response_model=ResetResponse)
@@ -94,6 +138,10 @@ def reset():
 def step(action: Action):
     obs, reward, done, info = env.step(action.task_index)
     return StepResponse(observation=obs, reward=reward, done=done, info=info)
+
+@app.get("/state", response_model=StateResponse)
+def get_state():
+    return StateResponse(state=env.state())
 
 if __name__ == "__main__":
     import uvicorn

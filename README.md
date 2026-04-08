@@ -1,28 +1,30 @@
 # 🧠 AI-Based CPU Task Scheduler (OpenEnv)
 
-A minimal, high-performance Reinforcement Learning environment for optimizing CPU task scheduling, built for the **Meta PyTorch OpenEnv Hackathon**.
+A complete, real-world Reinforcement Learning environment for optimizing CPU task scheduling, built for the **Meta PyTorch OpenEnv Hackathon**.
 
-![Status](https://img.shields.io/badge/Status-Working-success)
+![Status](https://img.shields.io/badge/Status-Complete-success)
 ![Platform](https://img.shields.io/badge/Platform-OpenEnv-blue)
 ![Lang](https://img.shields.io/badge/Python-3.10%2B-blue)
 
-## 🎯 Problem Statement
-CPU scheduling is a fundamental operating system task. Traditional algorithms like **First-In-First-Out (FIFO)** or **Round Robin (RR)** often fall short in dynamic workloads. This project provides a simulator where an RL agent can learn to minimize **Average Waiting Time** and maximize system efficiency by selecting which task to execute at every time unit.
+## 🎯 Project Goals
+Build a standardized RL environment that follows the **OpenEnv API** (`step`, `reset`, `state`). This simulator models a priority-based CPU scheduler where an AI agent must manage dynamic task arrivals and conflicting priorities to minimize system latency.
 
-## 🏗️ RL Formulation
+## 🏗️ Advanced Environment Design
 
-### 1. State Space
-The environment maintains a queue of tasks. The observation provided to the agent is a fixed-size vector representing:
-* **Remaining Time**: Time units left for the task to complete.
-* **Waiting Time**: Time units the task has spent in the queue.
+### 1. State Space (`state()`)
+The environment provides a full `EnvState` object containing:
+* **Task Queue**: Detailed list of `ready` tasks with remaining time and priority.
+* **CPU Load**: Real-time utilization metrics.
+* **System Wait Time**: Cumulative and average waiting times.
 
-### 2. Action Space
-* **Discrete(N)**: The index of the task in the queue to be executed for 1 time unit.
+### 2. Observation Space
+A fixed-size padded vector suitable for PyTorch models:
+* `[remaining_time, waiting_time, priority]` for each of the top 10 task slots.
 
-### 3. Reward Function
-* `-1.0`: Penalty per time step (encourages speed).
-* `+10.0`: Bonus for completing a task.
-* `-5.0`: Penalty for idleness if tasks are available.
+### 3. Reward Function (Real-World Weighted)
+* **Time Penalty**: `-1.0` per step.
+* **Wait Penalty**: Weighted by priority (Higher priority tasks waiting = more negative reward).
+* **Completion Bonus**: `+10.0 * TaskPriority`.
 
 ## 🚀 How to Run Locally
 
@@ -30,36 +32,33 @@ The environment maintains a queue of tasks. The observation provided to the agen
 * Python 3.10+
 * `pip install -r requirements.txt`
 
-### Run Inference (Baseline SJF)
-Run the built-in inference script to see a Shortest Job First (SJF) policy in action:
+### Run Advanced Inference
+Execute the built-in inference script to see the **Priority-Aware SJF** policy:
 ```bash
 python inference.py
 ```
 
-### Start environment API
-The environment is exposed via FastAPI, allowing external agents to interact with it:
+### Start OpenEnv API Server
 ```bash
 uvicorn env:app --host 0.0.0.0 --port 8000
 ```
+Visit `http://localhost:8000/state` to see the live system metrics.
 
 ## 🧪 Example Output
 ```text
-Step 1: Action (Task 2), Reward: -1.00, Done: False
-Step 2: Action (Task 2), Reward: 9.00, Done: False
+[01] Action: Task 1 (Prio: 8) | Reward:  -1.30 | Done: False
+[02] Action: Task 1 (Prio: 8) | Reward:  78.70 | Done: False
 ...
-📊 PERFORMANCE SUMMARY
-Total Steps (Time Units): 24
-Total Reward: 26.00
-Average Waiting Time: 7.40
-Tasks Completed: 5
+📊 REAL-WORLD PERFORMANCE REPORT
+Total Time Units    : 28
+Total Cumulative Reward: 142.40
+Average Waiting Time : 8.50
+Tasks Completed     : 5
+Final CPU Utilization: 100.0%
 ```
 
-## 🐳 Deployment (Hugging Face Spaces)
-This repository is ready for deployment as a **Docker Space**.
-1. Create a new Space on Hugging Face.
-2. Select **Docker** as the SDK.
-3. Push these files to the repository.
-4. Your environment API will be available at your Space's URL.
+## 🐳 Deployment
+Optimized for **Hugging Face Spaces** (Docker SDK). The server runs on port `7860` by default in the container.
 
 ## 📄 License
 MIT License
