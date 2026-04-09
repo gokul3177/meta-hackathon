@@ -22,6 +22,7 @@ class EnvState(BaseModel):
     finished_tasks: List[Task] = []
     cpu_utilization: float = 0.0
     avg_waiting_time: float = 0.0
+    starvation_risk: float = 0.0
     total_reward: float = 0.0
 
 class Action(BaseModel):
@@ -37,6 +38,7 @@ class StepResponse(BaseModel):
     reward: float
     done: bool
     info: dict
+    explanation: Optional[str] = None
 
 class ResetResponse(BaseModel):
     observation: Observation

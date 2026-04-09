@@ -1,0 +1,7 @@
+name: "cpu-scheduler-rl"
+version: "1.0.0"
+description: "Advanced AI-driven CPU Task Scheduler with Hybrid Validation and Explainable Decisions."
+benchmark: "meta-hackathon-v1"
+entry_point: "env:app"
+docker_image: "python:3.10-slim"
+env_type: "custom"

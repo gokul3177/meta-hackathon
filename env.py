@@ -49,10 +49,13 @@ class CPUSchedulerEnv(Env):
     def state(self):
         # Calculate system metrics
         total_wait = sum(t.waiting_time for t in self.finished_tasks + self.task_queue)
-        avg_wait = total_wait / (len(self.finished_tasks) + len(self.task_queue)) if (len(self.finished_tasks) + len(self.task_queue)) > 0 else 0
+        total_tasks = len(self.finished_tasks) + len(self.task_queue)
+        avg_wait = total_wait / total_tasks if total_tasks > 0 else 0
         
-        # CPU utilization is % of time spent on tasks vs idle (simulation is 1 unit per step)
-        # In this minimal env, we assume CPU is active if queue is not empty.
+        # Starvation risk: percentage of tasks currently exceeding their dynamic threshold
+        starving_count = sum(1 for t in self.task_queue if t.waiting_time > max(15, 2 * t.burst_time))
+        starvation_risk = starving_count / len(self.task_queue) if self.task_queue else 0.0
+        
         cpu_util = 1.0 if len(self.task_queue) > 0 else 0.0
         
         return EnvState(
@@ -61,6 +64,7 @@ class CPUSchedulerEnv(Env):
             finished_tasks=self.finished_tasks,
             cpu_utilization=cpu_util,
             avg_waiting_time=avg_wait,
+            starvation_risk=starvation_risk,
             total_reward=self.total_reward
         )
 
@@ -82,20 +86,32 @@ class CPUSchedulerEnv(Env):
     def step(self, action_idx):
         reward = 0.0
         done = False
+        info = {"explanation": ""}
         
         if not self.task_queue:
-            return self._get_observation(), -5.0, True, {"msg": "No tasks left"}
+            return self._get_observation(), -5.0, True, {"msg": "No tasks left", "explanation": "No tasks available to schedule."}
 
-        # Dynamic Task Arrival (15% chance of a new task appearing)
+        # Dynamic Task Arrival
         if random.random() < 0.15:
             self._generate_task()
 
-        # Action Handling
+        # Hybrid Decision System: Rule-based Validator
+        # Check if any task is starving
+        starving_indices = [i for i, t in enumerate(self.task_queue) if t.waiting_time > max(15, 2 * t.burst_time)]
+        
+        # Action Handling & Validation
         if action_idx < 0 or action_idx >= len(self.task_queue):
-            reward -= 5.0 # Heavier penalty for invalid actions
+            reward -= 5.0 
             actual_action = 0 
+            info["explanation"] += "Invalid task index provided. Defaulted to task 0. "
         else:
             actual_action = action_idx
+            # Fairness Check: If there are starving tasks and we pick a non-starving one
+            if starving_indices and actual_action not in starving_indices:
+                reward -= 10.0 # Starvation avoidance penalty
+                info["explanation"] += f"Fairness Alert: Ignored starving task(s) {starving_indices}. "
+            else:
+                info["explanation"] += "Action validated by hybrid controller. "
 
         # Execute Task
         task = self.task_queue[actual_action]
@@ -109,23 +125,31 @@ class CPUSchedulerEnv(Env):
                 t.waiting_time += 1
                 t.status = TaskStatus.READY
         
-        # Real-world reward: Penalize based on priority
-        # High priority tasks waiting = more penalty
-        step_penalty = sum(t.priority * 0.1 for t in self.task_queue if t != task)
-        reward -= (1.0 + step_penalty)
+        # Adaptive Reward System
+        # 1. Waiting penalty (weighted by priority)
+        waiting_penalty = sum(t.waiting_time * 0.05 * t.priority for t in self.task_queue)
         
-        # Completion bonus weighted by priority
+        # 2. Completion bonus
+        completion_bonus = 0.0
         if task.remaining_time <= 0:
-            reward += (10.0 * task.priority)
+            completion_bonus = 10.0 * task.priority
             task.status = TaskStatus.COMPLETED
             self.finished_tasks.append(task)
             self.task_queue.pop(actual_action)
+            info["explanation"] += f"Task {task.task_id} completed (Priority: {task.priority}). "
+        else:
+            info["explanation"] += f"Task {task.task_id} is running (Remaining: {task.remaining_time}). "
+
+        # 3. Utilization bonus (if queue not empty)
+        util_bonus = 1.0 if self.task_queue else 0.0
+
+        reward += (completion_bonus - waiting_penalty + util_bonus)
             
         if not self.task_queue:
             done = True
             
         self.total_reward += reward
-        return self._get_observation(), float(reward), done, {}
+        return self._get_observation(), float(reward), done, info
 
 # API
 env = CPUSchedulerEnv()
@@ -142,7 +166,8 @@ def reset():
 @app.post("/step", response_model=StepResponse)
 def step(action: Action):
     obs, reward, done, info = env.step(action.task_index)
-    return StepResponse(observation=obs, reward=reward, done=done, info=info)
+    explanation = info.get("explanation", "")
+    return StepResponse(observation=obs, reward=reward, done=done, info=info, explanation=explanation)
 
 @app.get("/state", response_model=StateResponse)
 def get_state():
